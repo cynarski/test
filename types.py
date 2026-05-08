@@ -1,87 +1,71 @@
-from __future__ import annotations
-
-import importlib
-import sys
-import zipfile
-import tempfile
 from pathlib import Path
 
 
-_ROOT = Path(__file__).resolve().parent
-_SOURCE_DIR = _ROOT / "source"
-_SPARK_SOURCE_DIR = _ROOT / "spark_source"
-
-_SENT_TO_SPARK = set()
+_ALREADY_SENT = set()
 
 
-def _ensure_source_on_path() -> None:
-    source = str(_SOURCE_DIR)
-    if source not in sys.path:
-        sys.path.insert(0, source)
-
-
-def _zip_spark_package(package_name: str) -> str:
-    package_dir = _SPARK_SOURCE_DIR / package_name
-
-    if not package_dir.exists():
-        raise ImportError(f"Brak spark_source/{package_name}")
-
-    zip_path = Path(tempfile.gettempdir()) / f"mypack_{package_name}_spark.zip"
-
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for file in package_dir.rglob("*"):
-            if file.is_file():
-                arcname = file.relative_to(_SPARK_SOURCE_DIR)
-                zf.write(file, arcname)
-
-    return str(zip_path)
-
-
-def _send_to_spark(package_name: str) -> None:
-    if package_name in _SENT_TO_SPARK:
-        return
-
-    package_dir = _SPARK_SOURCE_DIR / package_name
-    if not package_dir.exists():
-        return
-
-    try:
-        from pyspark import SparkContext
-    except ImportError:
-        return
-
-    sc = SparkContext._active_spark_context
-    if sc is None:
-        return
-
-    zip_path = _zip_spark_package(package_name)
-    sc.addPyFile(zip_path)
-
-    _SENT_TO_SPARK.add(package_name)
-
-
-def __getattr__(name: str):
+def send_matching_spark_dir(source_package_file: str) -> None:
     """
-    Dzięki temu działa:
+    Mapuje katalog z my_lib/source/... na odpowiadający katalog
+    my_lib/source_spark/... i wysyła go do Sparka.
 
-        from mypack import pack1
-
-    bez pisania:
-
-        import mypack.pack1
-        mypack.load(...)
-        mypack.register(...)
+    Przykład:
+        my_lib/source/dir1/__init__.py
+        ->
+        my_lib/source_spark/dir1
     """
-    local_package = _SOURCE_DIR / name
 
-    if not local_package.exists():
-        raise AttributeError(f"module 'mypack' has no attribute {name!r}")
+    source_dir = Path(source_package_file).resolve().parent
 
-    _ensure_source_on_path()
+    # Dla:
+    # my_lib/source/dir1/__init__.py
+    #
+    # source_dir = my_lib/source/dir1
+    # source_dir.parents[0] = my_lib/source
+    # source_dir.parents[1] = my_lib
+    package_root = source_dir.parents[1]
 
-    module = importlib.import_module(name)
+    source_root = package_root / "source"
+    spark_root = package_root / "source_spark"
 
-    _send_to_spark(name)
+    relative_path = source_dir.relative_to(source_root)
 
-    globals()[name] = module
-    return module
+    spark_dir = spark_root / relative_path
+
+    if not spark_dir.exists():
+        return
+
+    if spark_dir in _ALREADY_SENT:
+        return
+
+    send_to_spark(spark_dir)
+
+    _ALREADY_SENT.add(spark_dir)
+
+
+def send_to_spark(path: Path) -> None:
+    """
+    Tutaj wstaw swoją obecną logikę wysyłania plików do Sparka.
+
+    Jeśli już masz funkcję, która wysyła katalog albo pliki do Sparka,
+    możesz ją tutaj wywołać.
+    """
+
+    # PRZYKŁAD:
+    print(f"Wysyłam do Sparka: {path}")
+
+    # Tutaj podmień na swoją logikę, np.:
+    #
+    # for file in path.rglob("*.py"):
+    #     spark.sparkContext.addPyFile(str(file))
+    #
+    # albo:
+    #
+    # upload_directory_to_spark(path)
+
+
+from my_lib.spark_upload import send_matching_spark_dir
+
+send_matching_spark_dir(__file__)
+
+
