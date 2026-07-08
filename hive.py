@@ -1,594 +1,495 @@
-from __future__ import annotations
-
-import math
-from datetime import date, datetime
-from decimal import Decimal
-from typing import Any, Dict, Mapping, Sequence
-from uuid import uuid4
-
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql import functions as F
+from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql.types import StructType
+from typing import Union, List, Tuple, Dict, Any
 
 
-class HivePartitionManager:
-    """
-    Zarządzanie partycjami istniejącej tabeli Hive/Spark.
+spark = SparkSession.builder.getOrCreate()
 
-    Obsługuje:
-    - odczyt tabeli przez spark.table("db.table")
-    - sprawdzanie istnienia partycji
-    - dodawanie danych do partycji
-    - nadpisywanie danych partycji
-    - dodawanie pustej partycji do metastore
-    - usuwanie partycji
-    - odczyt konkretnej partycji
 
-    Działa dla:
-    - jednej kolumny partycjonującej
-    - wielu kolumn partycjonujących
-    """
+class HiveSpark:
 
     def __init__(
         self,
-        spark: SparkSession,
-        table_name: str,
-        partition_cols: Sequence[str],
+        table_name: str
     ) -> None:
-        if not table_name or not table_name.strip():
-            raise ValueError("table_name nie może być pusty")
 
-        if not partition_cols:
-            raise ValueError(
-                "partition_cols musi zawierać co najmniej jedną kolumnę"
-            )
-
-        if len(set(partition_cols)) != len(partition_cols):
-            raise ValueError(
-                f"partition_cols zawiera duplikaty: {partition_cols}"
-            )
-
-        self.spark = spark
         self.table_name = table_name
-        self.partition_cols = list(partition_cols)
 
-        # Ważne:
-        # dostęp do tabeli odbywa się przez spark.table(...)
-        table_df = self.spark.table(self.table_name)
+    # ==========================================================
+    # SCHEMA
+    # ==========================================================
 
-        missing_partition_cols = [
-            col_name
-            for col_name in self.partition_cols
-            if col_name not in table_df.columns
+    @property
+    def _get_hive_table_schema(self) -> StructType:
+        return spark.table(
+            self.table_name
+        ).schema
+
+    # ==========================================================
+    # PARTITION COLUMNS
+    # ==========================================================
+
+    @property
+    def _get_partition_columns(self) -> List[str]:
+
+        db, table_name = self.table_name.split(".", 1)
+
+        return [
+            col.name.lower()
+            for col in spark.catalog.listColumns(
+                table_name,
+                db
+            )
+            if col.isPartition
         ]
 
-        if missing_partition_cols:
-            raise ValueError(
-                f"Kolumny partycjonujące nie istnieją w tabeli "
-                f"{self.table_name}: {missing_partition_cols}"
+    # ==========================================================
+    # PROVIDER
+    # ==========================================================
+
+    @property
+    def table_provider(self) -> str:
+
+        row = (
+            spark.sql(
+                f"DESCRIBE FORMATTED {self.table_name}"
             )
-
-    # ============================================================
-    # PUBLIC API
-    # ============================================================
-
-    def table(self) -> DataFrame:
-        """
-        Zwraca całą tabelę jako DataFrame.
-
-        Dostęp dokładnie przez:
-            spark.table("db.table")
-        """
-        return self.spark.table(self.table_name)
-
-    def partition_exists(
-        self,
-        partition_spec: Mapping[str, Any],
-    ) -> bool:
-        """
-        Sprawdza, czy konkretna partycja istnieje.
-
-        Przykład jednej kolumny:
-            {"dt": "2026-07-08"}
-
-        Przykład wielu kolumn:
-            {
-                "year": 2026,
-                "month": 7,
-                "day": 8
-            }
-        """
-        spec = self._validate_partition_spec(
-            partition_spec,
-            require_full=True,
+            .where(
+                "trim(col_name) = 'Provider:'"
+            )
+            .select("data_type")
+            .first()
         )
 
-        partition_sql = self._build_partition_sql(spec)
+        return (
+            row["data_type"].lower()
+            if row and row["data_type"]
+            else None
+        )
 
-        query = f"""
-            SHOW PARTITIONS {self._quoted_table_name()}
-            {partition_sql}
-        """
+    # ==========================================================
+    # TABLE EXISTS
+    # ==========================================================
 
-        result = self.spark.sql(query)
+    def _check_table_exist_in_hive(self) -> bool:
 
-        # Nie pobieramy wszystkich partycji.
-        # Wystarczy informacja, czy istnieje pierwszy rekord.
-        return bool(result.take(1))
+        db, table_name = self.table_name.split(".", 1)
 
-    def append_to_partition(
+        return spark.catalog.tableExists(
+            table_name,
+            db
+        )
+
+    # ==========================================================
+    # APPEND
+    # ==========================================================
+
+    def append_to_hive(
         self,
-        df: DataFrame,
-        partition_spec: Mapping[str, Any],
+        df: DataFrame
     ) -> None:
-        """
-        Dodaje dane do konkretnej partycji.
 
-        Jeżeli partycja nie istnieje, zostanie utworzona
-        przez INSERT INTO.
+        hive_schema = self._get_hive_table_schema
 
-        Jeżeli istnieje, dane zostaną dopisane.
-
-        DataFrame może:
-        - zawierać kolumny partycjonujące
-        - nie zawierać kolumn partycjonujących
-
-        Jeśli zawiera kolumny partycjonujące, ich wartości
-        są walidowane względem partition_spec.
-        """
-        self._write_to_partition(
-            df=df,
-            partition_spec=partition_spec,
-            overwrite=False,
+        assert df.schema == hive_schema, (
+            f"Schemas are not the same: "
+            f"expected {hive_schema}, "
+            f"got {df.schema}"
         )
 
-    def overwrite_partition(
-        self,
-        df: DataFrame,
-        partition_spec: Mapping[str, Any],
-    ) -> None:
-        """
-        Nadpisuje konkretną partycję.
-
-        Używa:
-            INSERT OVERWRITE TABLE ... PARTITION (...)
-        """
-        self._write_to_partition(
-            df=df,
-            partition_spec=partition_spec,
-            overwrite=True,
+        partition_columns = (
+            self._get_partition_columns
         )
 
-    def add_partition(
-        self,
-        partition_spec: Mapping[str, Any],
-        location: str | None = None,
-        if_not_exists: bool = True,
-    ) -> None:
-        """
-        Dodaje partycję do Hive Metastore bez zapisywania danych.
+        if partition_columns:
 
-        Opcjonalnie można podać LOCATION.
-
-        Przykład:
-            manager.add_partition(
-                {"dt": "2026-07-08"}
-            )
-
-        albo:
-            manager.add_partition(
-                {"year": 2026, "month": 7},
-                location="hdfs:///data/table/year=2026/month=7"
-            )
-        """
-        spec = self._validate_partition_spec(
-            partition_spec,
-            require_full=True,
-        )
-
-        partition_sql = self._build_partition_sql(spec)
-
-        if_not_exists_sql = (
-            "IF NOT EXISTS"
-            if if_not_exists
-            else ""
-        )
-
-        location_sql = ""
-
-        if location is not None:
-            location_sql = (
-                f" LOCATION {self._sql_literal(location)}"
-            )
-
-        query = f"""
-            ALTER TABLE {self._quoted_table_name()}
-            ADD {if_not_exists_sql}
-            {partition_sql}
-            {location_sql}
-        """
-
-        self.spark.sql(query)
-
-    def drop_partition(
-        self,
-        partition_spec: Mapping[str, Any],
-        if_exists: bool = True,
-        purge: bool = False,
-    ) -> bool:
-        """
-        Usuwa partycję.
-
-        Zwraca:
-            True  - partycja istniała przed usunięciem
-            False - partycja nie istniała
-
-        purge=True dodaje PURGE do ALTER TABLE.
-        Używaj ostrożnie.
-        """
-        spec = self._validate_partition_spec(
-            partition_spec,
-            require_full=True,
-        )
-
-        existed = self.partition_exists(spec)
-
-        partition_sql = self._build_partition_sql(spec)
-
-        if_exists_sql = (
-            "IF EXISTS"
-            if if_exists
-            else ""
-        )
-
-        purge_sql = (
-            "PURGE"
-            if purge
-            else ""
-        )
-
-        query = f"""
-            ALTER TABLE {self._quoted_table_name()}
-            DROP {if_exists_sql}
-            {partition_sql}
-            {purge_sql}
-        """
-
-        self.spark.sql(query)
-
-        return existed
-
-    def read_partition(
-        self,
-        partition_spec: Mapping[str, Any],
-    ) -> DataFrame:
-        """
-        Odczytuje konkretną partycję jako DataFrame.
-
-        Tabela jest pobierana przez:
-            spark.table(self.table_name)
-
-        Następnie nakładany jest filtr po kolumnach partycji.
-        """
-        spec = self._validate_partition_spec(
-            partition_spec,
-            require_full=True,
-        )
-
-        df = self.spark.table(self.table_name)
-
-        condition = None
-
-        for col_name, value in spec.items():
-            current_condition = (
-                F.col(self._quoted_identifier(col_name))
-                .eqNullSafe(F.lit(value))
-            )
-
-            condition = (
-                current_condition
-                if condition is None
-                else condition & current_condition
-            )
-
-        return df.filter(condition)
-
-    # ============================================================
-    # INTERNAL WRITE
-    # ============================================================
-
-    def _write_to_partition(
-        self,
-        df: DataFrame,
-        partition_spec: Mapping[str, Any],
-        overwrite: bool,
-    ) -> None:
-        """
-        Wspólna implementacja INSERT INTO / INSERT OVERWRITE.
-        """
-        spec = self._validate_partition_spec(
-            partition_spec,
-            require_full=True,
-        )
-
-        # Pobranie schematu/kolumn tabeli dokładnie przez spark.table(...)
-        target_df = self.spark.table(self.table_name)
-        target_columns = target_df.columns
-
-        # Kolumny danych = wszystkie poza partycjonującymi
-        data_columns = [
-            col_name
-            for col_name in target_columns
-            if col_name not in self.partition_cols
-        ]
-
-        self._validate_input_dataframe(
-            df=df,
-            target_columns=target_columns,
-            data_columns=data_columns,
-            partition_spec=spec,
-        )
-
-        # Wybieramy wyłącznie kolumny niepartycjonujące
-        # i dokładnie w kolejności tabeli docelowej.
-        source_df = df.select(
-            *[
-                F.col(self._quoted_identifier(col_name))
-                for col_name in data_columns
-            ]
-        )
-
-        temp_view_name = (
-            f"_hive_partition_manager_{uuid4().hex}"
-        )
-
-        try:
-            source_df.createOrReplaceTempView(temp_view_name)
-
-            operation = (
-                "OVERWRITE"
-                if overwrite
-                else "INTO"
-            )
-
-            partition_sql = self._build_partition_sql(spec)
-
-            select_columns_sql = ", ".join(
-                self._quoted_identifier(col_name)
-                for col_name in data_columns
-            )
-
-            query = f"""
-                INSERT {operation}
-                TABLE {self._quoted_table_name()}
-                {partition_sql}
-                SELECT {select_columns_sql}
-                FROM {self._quoted_identifier(temp_view_name)}
-            """
-
-            self.spark.sql(query)
-
-        finally:
-            # Sprzątamy widok również w razie błędu INSERT-a.
-            self.spark.catalog.dropTempView(temp_view_name)
-
-    # ============================================================
-    # VALIDATION
-    # ============================================================
-
-    def _validate_input_dataframe(
-        self,
-        df: DataFrame,
-        target_columns: Sequence[str],
-        data_columns: Sequence[str],
-        partition_spec: Mapping[str, Any],
-    ) -> None:
-        """
-        Sprawdza zgodność wejściowego DataFrame z tabelą.
-        """
-
-        # 1. Sprawdzenie brakujących kolumn danych
-        missing_columns = [
-            col_name
-            for col_name in data_columns
-            if col_name not in df.columns
-        ]
-
-        if missing_columns:
-            raise ValueError(
-                f"DataFrame nie zawiera wymaganych kolumn tabeli "
-                f"{self.table_name}: {missing_columns}"
-            )
-
-        # 2. Sprawdzenie nieznanych kolumn
-        extra_columns = [
-            col_name
-            for col_name in df.columns
-            if col_name not in target_columns
-        ]
-
-        if extra_columns:
-            raise ValueError(
-                f"DataFrame zawiera kolumny, których nie ma w tabeli "
-                f"{self.table_name}: {extra_columns}"
-            )
-
-        # 3. Jeśli DataFrame posiada kolumny partycjonujące,
-        #    sprawdzamy, czy zgadzają się z partition_spec.
-        mismatch_condition = None
-
-        for col_name, expected_value in partition_spec.items():
-            if col_name not in df.columns:
-                continue
-
-            current_mismatch = ~(
-                F.col(self._quoted_identifier(col_name))
-                .eqNullSafe(F.lit(expected_value))
-            )
-
-            mismatch_condition = (
-                current_mismatch
-                if mismatch_condition is None
-                else mismatch_condition | current_mismatch
-            )
-
-        if mismatch_condition is not None:
-            has_mismatch = bool(
-                df.filter(mismatch_condition)
-                .limit(1)
-                .take(1)
-            )
-
-            if has_mismatch:
-                raise ValueError(
-                    f"DataFrame zawiera wartości kolumn partycjonujących "
-                    f"niezgodne z partition_spec={dict(partition_spec)}"
+            missing_partitions = (
+                set(partition_columns)
+                - set(
+                    col.lower()
+                    for col in df.columns
                 )
+            )
 
-    def _validate_partition_spec(
-        self,
-        partition_spec: Mapping[str, Any],
-        require_full: bool,
-    ) -> Dict[str, Any]:
-        """
-        Waliduje specyfikację partycji i ustawia stabilną kolejność
-        zgodną z partition_cols.
-        """
-        if not partition_spec:
+            assert not missing_partitions, (
+                f"Missing partition columns "
+                f"in DataFrame: "
+                f"{missing_partitions}"
+            )
+
+        table_provider = self.table_provider
+
+        if not table_provider:
             raise ValueError(
-                "partition_spec nie może być pusty"
+                f"Nie można określić providera "
+                f"dla tabeli {self.table_name}"
             )
 
-        unknown_columns = set(partition_spec) - set(self.partition_cols)
-
-        if unknown_columns:
-            raise ValueError(
-                f"Nieznane kolumny partycjonujące: "
-                f"{sorted(unknown_columns)}. "
-                f"Oczekiwane: {self.partition_cols}"
+        (
+            df.write
+            .partitionBy(
+                partition_columns
+                if partition_columns
+                else []
             )
-
-        if require_full:
-            missing_columns = (
-                set(self.partition_cols)
-                - set(partition_spec)
-            )
-
-            if missing_columns:
-                raise ValueError(
-                    f"Brakuje kolumn partycjonujących: "
-                    f"{sorted(missing_columns)}. "
-                    f"Wymagane: {self.partition_cols}"
-                )
-
-        # None odrzucamy celowo.
-        # Obsługa NULL-owych partycji zależy od konfiguracji
-        # i konwencji Hive (__HIVE_DEFAULT_PARTITION__).
-        null_columns = [
-            col_name
-            for col_name, value in partition_spec.items()
-            if value is None
-        ]
-
-        if null_columns:
-            raise ValueError(
-                f"Wartość None nie jest obsługiwana dla partycji: "
-                f"{null_columns}"
-            )
-
-        # Stabilna kolejność zgodna z partition_cols
-        return {
-            col_name: partition_spec[col_name]
-            for col_name in self.partition_cols
-            if col_name in partition_spec
-        }
-
-    # ============================================================
-    # SQL HELPERS
-    # ============================================================
-
-    def _build_partition_sql(
-        self,
-        partition_spec: Mapping[str, Any],
-    ) -> str:
-        """
-        Buduje:
-            PARTITION (`dt` = '2026-07-08')
-
-        albo:
-            PARTITION (
-                `year` = 2026,
-                `month` = 7,
-                `day` = 8
-            )
-        """
-        parts = [
-            (
-                f"{self._quoted_identifier(col_name)} "
-                f"= {self._sql_literal(value)}"
-            )
-            for col_name, value in partition_spec.items()
-        ]
-
-        return f"PARTITION ({', '.join(parts)})"
-
-    def _quoted_table_name(self) -> str:
-        """
-        db.table -> `db`.`table`
-        catalog.db.table -> `catalog`.`db`.`table`
-        """
-        parts = self.table_name.split(".")
-
-        if not all(parts):
-            raise ValueError(
-                f"Niepoprawna nazwa tabeli: {self.table_name}"
-            )
-
-        return ".".join(
-            self._quoted_identifier(part)
-            for part in parts
+            .format(table_provider)
+            .mode("append")
+            .saveAsTable(self.table_name)
         )
 
-    @staticmethod
-    def _quoted_identifier(identifier: str) -> str:
-        """
-        Bezpieczne cytowanie identyfikatora SQL.
-        """
-        escaped = identifier.replace("`", "``")
-        return f"`{escaped}`"
+    # ==========================================================
+    # SQL LITERAL
+    # ==========================================================
 
     @staticmethod
     def _sql_literal(value: Any) -> str:
-        """
-        Konwertuje wartość Pythona do literału Spark SQL.
-        """
+
         if value is None:
-            return "NULL"
+            raise ValueError(
+                "None nie jest obsługiwane "
+                "dla wartości partycji."
+            )
 
         if isinstance(value, bool):
-            return "TRUE" if value else "FALSE"
+            return "true" if value else "false"
 
-        if isinstance(value, int):
+        if isinstance(value, (int, float)):
             return str(value)
 
-        if isinstance(value, Decimal):
-            return str(value)
+        escaped = str(value).replace(
+            "'",
+            "''"
+        )
 
-        if isinstance(value, float):
-            if not math.isfinite(value):
-                raise ValueError(
-                    f"Niedozwolona wartość float: {value}"
-                )
-            return repr(value)
-
-        if isinstance(value, datetime):
-            formatted = value.strftime(
-                "%Y-%m-%d %H:%M:%S.%f"
-            )
-            return f"TIMESTAMP '{formatted}'"
-
-        if isinstance(value, date):
-            return f"DATE '{value.isoformat()}'"
-
-        # Domyślnie traktujemy jako STRING
-        escaped = str(value).replace("'", "''")
         return f"'{escaped}'"
+
+    # ==========================================================
+    # NORMALIZE PARTITION
+    # ==========================================================
+
+    def _normalize_partition(
+        self,
+        partition: Union[
+            str,
+            List,
+            Tuple,
+            Dict
+        ]
+    ) -> Dict[str, Any]:
+
+        partition_columns = (
+            self._get_partition_columns
+        )
+
+        if not partition_columns:
+            raise ValueError(
+                f"Tabela {self.table_name} "
+                f"nie jest partycjonowana."
+            )
+
+        # -----------------------------
+        # DICT
+        # -----------------------------
+        if isinstance(partition, dict):
+
+            normalized = {
+                str(key).lower(): value
+                for key, value
+                in partition.items()
+            }
+
+        # -----------------------------
+        # STR
+        # -----------------------------
+        elif isinstance(partition, str):
+
+            if "=" in partition:
+
+                col_name, value = (
+                    partition.split("=", 1)
+                )
+
+                normalized = {
+                    col_name.strip().lower():
+                    value.strip()
+                }
+
+            else:
+
+                if len(partition_columns) != 1:
+                    raise ValueError(
+                        f"Tabela ma wiele kolumn "
+                        f"partycjonujących: "
+                        f"{partition_columns}. "
+                        f"Użyj dict."
+                    )
+
+                normalized = {
+                    partition_columns[0]:
+                    partition
+                }
+
+        # -----------------------------
+        # LIST / TUPLE
+        # -----------------------------
+        elif isinstance(
+            partition,
+            (list, tuple)
+        ):
+
+            if not partition:
+                raise ValueError(
+                    "Lista partycji jest pusta."
+                )
+
+            # ["dt=2024-01-01", "hr=12"]
+            if all(
+                isinstance(item, str)
+                and "=" in item
+                for item in partition
+            ):
+
+                normalized = {}
+
+                for item in partition:
+
+                    col_name, value = (
+                        item.split("=", 1)
+                    )
+
+                    col_name = (
+                        col_name
+                        .strip()
+                        .lower()
+                    )
+
+                    normalized[col_name] = (
+                        value.strip()
+                    )
+
+            # ["2024-01-01", "12"]
+            else:
+
+                if (
+                    len(partition)
+                    != len(partition_columns)
+                ):
+                    raise ValueError(
+                        f"Oczekiwano "
+                        f"{len(partition_columns)} "
+                        f"wartości partycji, "
+                        f"otrzymano "
+                        f"{len(partition)}."
+                    )
+
+                normalized = dict(
+                    zip(
+                        partition_columns,
+                        partition
+                    )
+                )
+
+        else:
+            raise ValueError(
+                "partition musi być typu "
+                "str, list, tuple lub dict."
+            )
+
+        # -----------------------------
+        # VALIDATION
+        # -----------------------------
+        provided = set(normalized)
+        expected = set(partition_columns)
+
+        unknown = provided - expected
+
+        if unknown:
+            raise ValueError(
+                f"Nieznane kolumny partycji: "
+                f"{sorted(unknown)}"
+            )
+
+        missing = expected - provided
+
+        if missing:
+            raise ValueError(
+                f"Brakujące kolumny partycji: "
+                f"{sorted(missing)}"
+            )
+
+        # Kolejność zgodna z tabelą
+        return {
+            col: normalized[col]
+            for col in partition_columns
+        }
+
+    # ==========================================================
+    # BUILD PARTITION SQL
+    # ==========================================================
+
+    def _build_partition_sql(
+        self,
+        partition: Union[
+            str,
+            List,
+            Tuple,
+            Dict
+        ]
+    ) -> str:
+
+        normalized = (
+            self._normalize_partition(
+                partition
+            )
+        )
+
+        conditions = [
+            (
+                f"`{col}`="
+                f"{self._sql_literal(value)}"
+            )
+            for col, value
+            in normalized.items()
+        ]
+
+        return (
+            f"PARTITION "
+            f"({', '.join(conditions)})"
+        )
+
+    # ==========================================================
+    # CHECK PARTITION
+    # ==========================================================
+
+    def check_partitions_in_hive(
+        self,
+        partition: Union[
+            str,
+            List,
+            Tuple,
+            Dict
+        ]
+    ) -> bool:
+
+        partition_sql = (
+            self._build_partition_sql(
+                partition
+            )
+        )
+
+        try:
+            result = spark.sql(
+                f"""
+                SHOW PARTITIONS
+                {self.table_name}
+                {partition_sql}
+                """
+            )
+
+            return bool(
+                result.limit(1).take(1)
+            )
+
+        except Exception as e:
+            raise Exception(
+                f"Błąd podczas sprawdzania "
+                f"partycji {partition} "
+                f"w tabeli "
+                f"{self.table_name} -> {e}"
+            ) from e
+
+    # ==========================================================
+    # DELETE PARTITION
+    # ==========================================================
+
+    def delete_partition_in_hive(
+        self,
+        partition: Union[
+            str,
+            List,
+            Tuple,
+            Dict
+        ]
+    ) -> None:
+
+        partition_sql = (
+            self._build_partition_sql(
+                partition
+            )
+        )
+
+        sql_query = (
+            f"ALTER TABLE "
+            f"{self.table_name} "
+            f"DROP IF EXISTS "
+            f"{partition_sql}"
+        )
+
+        try:
+            spark.sql(sql_query)
+
+        except Exception as e:
+            raise Exception(
+                f"Błąd podczas usuwania "
+                f"partycji {partition} "
+                f"z tabeli "
+                f"{self.table_name} -> {e}"
+            ) from e
+
+    # ==========================================================
+    # TRUNCATE
+    # ==========================================================
+
+    def delete_all_data_in_hive(
+        self
+    ) -> None:
+
+        try:
+            spark.sql(
+                f"TRUNCATE TABLE "
+                f"{self.table_name}"
+            )
+
+        except Exception as e:
+            raise Exception(
+                f"Error during truncate table "
+                f"{self.table_name} -> {e}"
+            ) from e
+
+    # ==========================================================
+    # CREATE EMPTY TABLE
+    # ==========================================================
+
+    def create_empty_table(
+        self,
+        schema,
+        file_format,
+        partitions=None
+    ) -> None:
+
+        if not self._check_table_exist_in_hive():
+
+            df = spark.createDataFrame(
+                [],
+                schema
+            )
+
+            (
+                df.write
+                .partitionBy(
+                    partitions
+                    if partitions
+                    else []
+                )
+                .format(file_format)
+                .mode("overwrite")
+                .saveAsTable(
+                    self.table_name
+                )
+            )
+
+        else:
+            raise Exception(
+                f"Table {self.table_name} "
+                f"already exist"
+            )
