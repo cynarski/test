@@ -1,7 +1,16 @@
-API Reference
-=============
+Changelog
+=========
 
-.. toctree::
-   :maxdepth: 4
+0.1.0
+-----
 
-   api/modules
+Initial release.
+
+Added
+~~~~~
+
+* Initial package structure.
+* ETL utilities.
+* Spark utilities.
+* HDFS helpers.
+* Data quality utilities.
