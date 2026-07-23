@@ -1,47 +1,38 @@
-source-rim-pack documentation
-=============================
-
-``source-rim-pack`` is a Python package containing utilities for data engineering,
-Spark processing, ETL workflows, HDFS operations and data quality validation.
-
-It provides reusable components for working with local and distributed data
-pipelines.
-
 Installation
+============
+
+Requirements
 ------------
 
-Install the package with pip:
+``source-rim-pack`` requires Python 3.8 or newer.
+
+Basic installation
+------------------
+
+Install the package using pip:
 
 .. code-block:: bash
 
    pip install source-rim-pack
 
-Current version
----------------
+Development installation
+------------------------
 
-.. parsed-literal::
+If you are working with the source code, clone the repository and install the
+package in editable mode:
 
-   |release|
+.. code-block:: bash
 
-Contents
---------
+   git clone <repository-url>
+   cd source-rim-pack
+   pip install -e .
 
-.. toctree::
-   :maxdepth: 2
-   :caption: User Guide
+Optional dependencies
+---------------------
 
-   installation
-   quickstart
-   usage
+Some modules may require additional dependencies, for example Spark, HDFS,
+database connectors or dashboard-related libraries.
 
-.. toctree::
-   :maxdepth: 3
-   :caption: API Reference
+.. code-block:: bash
 
-   api
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Project
-
-   changelog
+   pip install pyspark sqlalchemy pandas
