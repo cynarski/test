@@ -5,56 +5,32 @@
 {%- endfor %}
 {%- endmacro %}
 
-{%- macro toctree(docnames) -%}
+{{ pkgname.split('.')[-1] | e | heading }}
+
+{% if subpackages %}
 .. toctree::
    :maxdepth: {{ maxdepth }}
 
-{% for docname in docnames %}
-   {{ docname }}
-{%- endfor %}
-{%- endmacro %}
-
-
-{{ pkgname.split('.')[-1] | e | heading }}
-
-
-{%- if is_namespace %}
-.. py:module:: {{ pkgname }}
+{% for subpackage in subpackages %}
+   {{ subpackage.split('.')[-1] }} <{{ subpackage }}>
+{% endfor %}
 {% endif %}
 
-
-{%- if modulefirst and not is_namespace %}
-{{ automodule(pkgname, automodule_options) }}
-{% endif %}
-
-
-{%- if subpackages %}
-
-{{ toctree(subpackages) }}
-
-{% endif %}
-
-
-{%- if submodules and separatemodules %}
-
-{{ toctree(submodules) }}
-
-{% endif %}
-
-
-{%- if submodules and not separatemodules %}
+{% if submodules and separatemodules %}
+.. toctree::
+   :maxdepth: {{ maxdepth }}
 
 {% for submodule in submodules %}
-
-{{ automodule(submodule, automodule_options) }}
-
+   {{ submodule.split('.')[-1] }} <{{ submodule }}>
 {% endfor %}
-
 {% endif %}
 
+{% if submodules and not separatemodules %}
+{% for submodule in submodules %}
+{{ automodule(submodule, automodule_options) }}
+{% endfor %}
+{% endif %}
 
-{%- if not modulefirst and not is_namespace %}
-
+{% if not is_namespace %}
 {{ automodule(pkgname, automodule_options) }}
-
 {% endif %}
