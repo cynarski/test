@@ -33,3 +33,14 @@ class SparkType(Enum):
             SparkType.DATE: DateType(),
             SparkType.TIMESTAMP: TimestampType(),
         }[self]
+
+
+
+extensions = [
+    "sphinx_multiversion",
+]
+
+smv_tag_whitelist = r"^\d+\.\d+\.\d+$"
+smv_branch_whitelist = r"^(main|develop)$"
+
+smv_released_pattern = r"^tags/.*$"
