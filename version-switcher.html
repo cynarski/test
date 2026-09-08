@@ -1,0 +1,39 @@
+{% if current_version %}
+<div class="custom-version-switcher">
+
+    <button
+        class="custom-version-current"
+        type="button"
+        aria-expanded="false"
+    >
+        <span>{{ current_version.name }}</span>
+        <span class="custom-version-arrow">▼</span>
+    </button>
+
+    <div class="custom-version-menu">
+
+        {% if versions.branches %}
+            {% for item in versions.branches %}
+                <a
+                    href="{{ item.url }}"
+                    class="{% if item.name == current_version.name %}active{% endif %}"
+                >
+                    {{ item.name }}
+                </a>
+            {% endfor %}
+        {% endif %}
+
+        {% if versions.tags %}
+            {% for item in versions.tags %}
+                <a
+                    href="{{ item.url }}"
+                    class="{% if item.name == current_version.name %}active{% endif %}"
+                >
+                    {{ item.name }}
+                </a>
+            {% endfor %}
+        {% endif %}
+
+    </div>
+</div>
+{% endif %}
