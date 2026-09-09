@@ -1,58 +1,52 @@
 .custom-version-switcher {
     position: relative;
-
-    width: 135px;
-
-    margin: 12px auto 14px auto;
-
-    text-align: left;
-
-    z-index: 9999;
+    width: 140px;
+    margin: 12px auto 16px auto;
+    z-index: 1000;
 }
 
 .custom-version-current {
     width: 100%;
-
-    padding: 8px 12px;
-
-    border: 1px solid rgba(255, 255, 255, 0.3);
-
+    border: 1px solid rgba(255, 255, 255, 0.25);
     background: rgba(255, 255, 255, 0.08);
 
     color: white;
 
-    font-size: 16px;
+    padding: 8px 12px;
 
+    font-size: 16px;
     cursor: pointer;
 
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    justify-content: space-between;
+
+    border-radius: 2px;
 }
 
 .custom-version-current:hover {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.14);
 }
 
 .custom-version-arrow {
-    font-size: 10px;
+    font-size: 11px;
+    margin-left: 10px;
 }
 
 .custom-version-menu {
     display: none;
 
     position: absolute;
-
-    left: 0;
     top: 100%;
+    left: 0;
 
     width: 100%;
 
     background: white;
 
-    box-shadow: 0 5px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
 
-    z-index: 10000;
+    z-index: 2000;
 }
 
 .custom-version-switcher.open .custom-version-menu {
@@ -64,27 +58,26 @@
 
     padding: 7px 10px;
 
-    color: #111 !important;
-
+    color: #222 !important;
     background: white;
 
     text-decoration: none;
 
-    font-size: 16px;
+    font-size: 15px;
 }
 
 .custom-version-menu a:hover {
-    background: #eeeeee;
+    background: #e7e7e7;
 }
 
 .custom-version-menu a.active {
     background: #2980b9;
-
     color: white !important;
 }
 
 /*
- * Schowaj oryginalny selector sphinx-multiversion.
+ * Ukrywamy domyślny version picker
+ * generowany przez sphinx-multiversion na dole.
  */
 .rst-versions {
     display: none !important;
