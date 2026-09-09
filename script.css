@@ -1,11 +1,97 @@
-.wy-side-nav-search .rst-versions {
-    position: relative !important;
-    bottom: auto !important;
-    left: auto !important;
-    width: 100% !important;
+/* kontener dropdownu */
+.top-version-switcher {
+    position: relative;
+    width: 130px;
+    margin: 12px auto 14px auto;
+    z-index: 9999;
+}
 
-    margin: 10px 0 !important;
+/* przycisk z aktualną wersją */
+.top-version-button {
+    width: 100%;
+    height: 38px;
 
-    text-align: left;
-    z-index: 1000;
+    padding: 0 12px;
+
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 2px;
+
+    background: rgba(255, 255, 255, 0.08);
+    color: white;
+
+    font-size: 16px;
+    font-weight: 400;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    cursor: pointer;
+}
+
+/* hover */
+.top-version-button:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+/* strzałka */
+.top-version-arrow {
+    font-size: 10px;
+    margin-left: 10px;
+}
+
+/* rozwijane menu */
+.top-version-menu {
+    display: none;
+
+    position: absolute;
+    top: 100%;
+    left: 0;
+
+    width: 100%;
+
+    background: white;
+
+    border: 1px solid #ccc;
+    border-top: none;
+
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
+
+    z-index: 10000;
+}
+
+/* pokazanie menu */
+.top-version-switcher.open .top-version-menu {
+    display: block;
+}
+
+/* element listy */
+.top-version-menu a {
+    display: block;
+
+    padding: 7px 10px;
+
+    background: white;
+    color: #222 !important;
+
+    text-decoration: none;
+
+    font-size: 15px;
+    line-height: 1.3;
+}
+
+/* hover */
+.top-version-menu a:hover {
+    background: #eeeeee;
+}
+
+/* aktualna wersja */
+.top-version-menu a.active {
+    background: #2980b9;
+    color: white !important;
+}
+
+/* ukryj oryginalny sphinx-multiversion */
+.rst-versions {
+    display: none !important;
 }
