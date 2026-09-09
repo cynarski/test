@@ -1,84 +1,11 @@
-.custom-version-switcher {
-    position: relative;
-    width: 140px;
-    margin: 12px auto 16px auto;
+.wy-side-nav-search .rst-versions {
+    position: relative !important;
+    bottom: auto !important;
+    left: auto !important;
+    width: 100% !important;
+
+    margin: 10px 0 !important;
+
+    text-align: left;
     z-index: 1000;
-}
-
-.custom-version-current {
-    width: 100%;
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    background: rgba(255, 255, 255, 0.08);
-
-    color: white;
-
-    padding: 8px 12px;
-
-    font-size: 16px;
-    cursor: pointer;
-
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-
-    border-radius: 2px;
-}
-
-.custom-version-current:hover {
-    background: rgba(255, 255, 255, 0.14);
-}
-
-.custom-version-arrow {
-    font-size: 11px;
-    margin-left: 10px;
-}
-
-.custom-version-menu {
-    display: none;
-
-    position: absolute;
-    top: 100%;
-    left: 0;
-
-    width: 100%;
-
-    background: white;
-
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
-
-    z-index: 2000;
-}
-
-.custom-version-switcher.open .custom-version-menu {
-    display: block;
-}
-
-.custom-version-menu a {
-    display: block;
-
-    padding: 7px 10px;
-
-    color: #222 !important;
-    background: white;
-
-    text-decoration: none;
-
-    font-size: 15px;
-}
-
-.custom-version-menu a:hover {
-    background: #e7e7e7;
-}
-
-.custom-version-menu a.active {
-    background: #2980b9;
-    color: white !important;
-}
-
-/*
- * Ukrywamy domyślny version picker
- * generowany przez sphinx-multiversion na dole.
- */
-.rst-versions {
-    display: none !important;
 }
