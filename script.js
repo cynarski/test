@@ -1,25 +1,16 @@
 document.addEventListener("DOMContentLoaded", function () {
-    const switcher = document.querySelector(".custom-version-switcher");
+    const versions = document.querySelector(".rst-versions");
+    const header = document.querySelector(".wy-side-nav-search");
 
-    if (!switcher) {
+    if (!versions || !header) {
         return;
     }
 
-    const button = switcher.querySelector(".custom-version-current");
+    const searchForm = header.querySelector("form");
 
-    button.addEventListener("click", function (event) {
-        event.stopPropagation();
-
-        const isOpen = switcher.classList.toggle("open");
-
-        button.setAttribute(
-            "aria-expanded",
-            isOpen ? "true" : "false"
-        );
-    });
-
-    document.addEventListener("click", function () {
-        switcher.classList.remove("open");
-        button.setAttribute("aria-expanded", "false");
-    });
+    if (searchForm) {
+        header.insertBefore(versions, searchForm);
+    } else {
+        header.appendChild(versions);
+    }
 });
